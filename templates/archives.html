@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Archived Scholarships & Internships{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">Archived Scholarships & Internships</h1>
+
+    <!-- Scholarships Archive -->
+    <h2>Scholarships</h2>
+    {% if scholarships %}
+    <div class="table-responsive">
+        <table class="table table-bordered table-striped">
+            <thead class="table-light">
+                <tr>
+                    <th>Name</th>
+                    <th>Eligibility</th>
+                    <th>Deadline</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in scholarships %}
+                <tr>
+                    <td>{{ s.name }}</td>
+                    <td>{{ s.eligibility }}</td>
+                    <td>{{ s.deadline }}</td>
+                    <td>
+                        <form action="{{ url_for('delete_archived_scholarship', id=s.id) }}" method="POST" onsubmit="return confirm('Delete this archived scholarship?');">
+                            <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>No archived scholarships found.</p>
+    {% endif %}
+
+    <!-- Internships Archive -->
+    <h2 class="mt-5">Internships</h2>
+    {% if internships %}
+    <div class="table-responsive">
+        <table class="table table-bordered table-striped">
+            <thead class="table-light">
+                <tr>
+                    <th>Name</th>
+                    <th>Eligibility</th>
+                    <th>Deadline</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for i in internships %}
+                <tr>
+                    <td>{{ i.name }}</td>
+                    <td>{{ i.eligibility }}</td>
+                    <td>{{ i.deadline }}</td>
+                    <td>
+                        <form action="{{ url_for('delete_archived_internship', id=i.id) }}" method="POST" onsubmit="return confirm('Delete this archived internship?');">
+                            <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>No archived internships found.</p>
+    {% endif %}
+</div>
+{% endblock %}
