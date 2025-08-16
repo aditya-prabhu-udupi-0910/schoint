@@ -28,6 +28,8 @@ c.execute('''
         amount TEXT,
         deadline TEXT,
         link TEXT,
+        duration TEXT,      
+        location TEXT, 
         approved INTEGER DEFAULT 0
     )
 ''')
@@ -64,9 +66,12 @@ c.execute('''
         amount TEXT,
         deadline TEXT,
         link TEXT,
+        duration TEXT,      -- ✅ add duration
+        location TEXT,      -- ✅ add location
         approved INTEGER DEFAULT 0
     )
 ''')
+
 
 # =====================
 # Insert sample data (only if empty)
@@ -77,8 +82,11 @@ sample_scholarships = [
 ]
 
 sample_internships = [
-    ("AI Research Intern", "Microsoft", "CS/AI students", "₹25,000/month", "2025-08-20", "https://careers.microsoft.com/intern", 1),
-    ("ML Intern", "Amazon", "B.Tech students with ML knowledge", "₹30,000/month", "2025-08-28", "https://amazon.jobs/intern", 1),
+    ("AI Research Intern", "Microsoft", "CS/AI students", "₹25,000/month", 
+     "2025-08-20", "https://careers.microsoft.com/intern", "3 months", "Remote", 1),
+    
+    ("ML Intern", "Amazon", "B.Tech students with ML knowledge", "₹30,000/month", 
+     "2025-08-28", "https://amazon.jobs/intern", "6 months", "Bengaluru", 1),
 ]
 
 # Insert scholarships
@@ -93,9 +101,10 @@ if c.fetchone()[0] == 0:
 c.execute("SELECT COUNT(*) FROM internships")
 if c.fetchone()[0] == 0:
     c.executemany('''
-        INSERT INTO internships (name, provider, eligibility, amount, deadline, link, approved)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    ''', sample_internships)
+    INSERT INTO internships 
+    (name, provider, eligibility, amount, deadline, link, duration, location, approved)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''', sample_internships)
+
 
 conn.commit()
 conn.close()

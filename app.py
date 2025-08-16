@@ -1,11 +1,12 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 import sqlite3
 from datetime import datetime
+from datetime import timedelta
 from flask_mail import Mail, Message
 
 app = Flask(__name__)
 app.secret_key = 'admin2005'  
-
+app.permanent_session_lifetime = timedelta(days=1)
 
 app.config['MAIL_SERVER'] = 'smtp.gmail.com'
 app.config['MAIL_PORT'] = 587
@@ -89,7 +90,7 @@ def internships():
 
 @app.route("/archives")
 def archives():
-    if not session.get("is_admin"):
+    if not session.get("logged_in"):
         return "Unauthorized", 403
 
     conn = get_db_connection()
@@ -104,7 +105,7 @@ def archives():
 
 @app.route("/delete_archived_scholarship/<int:id>", methods=["POST"])
 def delete_archived_scholarship(id):
-    if not session.get("is_admin"):
+    if not session.get("logged_in"):
         return "Unauthorized", 403
     conn = get_db_connection()
     cur = conn.cursor()
@@ -115,13 +116,15 @@ def delete_archived_scholarship(id):
 
 @app.route("/delete_archived_internship/<int:id>", methods=["POST"])
 def delete_archived_internship(id):
-    if not session.get("is_admin"):
+    if not session.get("logged_in"):
         return "Unauthorized", 403
+
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("DELETE FROM internships_archive WHERE id = ?", (id,))
     conn.commit()
     conn.close()
+    flash("Archived internship deleted.", "danger")
     return redirect(url_for("archives"))
 
 
@@ -160,7 +163,7 @@ def submit_scholarship():
             try:
                 msg = Message(
                     subject="🎓 New Scholarship Submitted!",
-                    sender=app.config['5407435.adityaprabhu@gmail.com'],
+                    sender=app.config['MAIL_DEFAULT_SENDER'],
                     recipients=[subscriber['email']],
                     body=f"A new scholarship '{name}' has been submitted. Visit the site to check it out!"
                 )
@@ -183,15 +186,18 @@ def submit_internship():
         amount = request.form["stipend"]
         deadline = request.form["deadline"]
         link = request.form["link"]
+        duration = request.form["duration"]
+        location = request.form["location"]
+
 
         conn = get_db_connection()
         cur = conn.cursor()
 
         # Save internship to database
-        cur.execute("""
-            INSERT INTO internships (name, provider, eligibility, amount, deadline, link, approved)
-            VALUES (?, ?, ?, ?, ?, ?, 0)
-        """, (name, provider, eligibility, amount, deadline, link))
+        cur.execute(""" INSERT INTO internships 
+        (name, provider, eligibility, amount, deadline, link, duration, location, approved)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
+        """, (name, provider, eligibility, amount, deadline, link, duration, location))
 
         # Fetch all newsletter subscribers
         cur.execute("SELECT email FROM subscribers")
@@ -205,7 +211,7 @@ def submit_internship():
             try:
                 msg = Message(
                     subject="🚀 New Internship Submitted!",
-                    sender=app.config['5407435.adityaprabhu@gmail.com'],
+                    sender=app.config['MAIL_DEFAULT_SENDER'],
                     recipients=[subscriber['email']],
                     body=f"A new internship '{name}' has been submitted. Visit the site to check it out!"
                 )
@@ -219,35 +225,6 @@ def submit_internship():
     return render_template("submit_internship.html")
 
 
-@app.route("/approve/<int:id>")
-def approve(id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("UPDATE scholarships SET approved = 1 WHERE id = ?", (id,))
-    cur.execute("SELECT * FROM scholarships WHERE id = ?", (id,))
-    scholarship = cur.fetchone()
-    notify_subscribers(
-        name=scholarship["name"],
-        provider=scholarship["provider"],
-        eligibility=scholarship["eligibility"],
-        amount=scholarship["amount"],
-        deadline=scholarship["deadline"],
-        link=scholarship["link"]
-    )
-
-    conn.commit()
-    conn.close()
-    return redirect(url_for('admin'))
-
-
-@app.route("/delete/<int:id>")
-def delete(id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM scholarships WHERE id = ?", (id,))
-    conn.commit()
-    conn.close()
-    return redirect(url_for('admin'))
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -255,18 +232,24 @@ def login():
         username = request.form["username"]
         password = request.form["password"]
 
-        if username == "admin" and password == "admin2005":  # Change these to secure values
+        if username == "admin" and password == "admin2005":  # admin credentials
+            session.permanent = True            # Keep session across pages
             session["logged_in"] = True
-            return redirect(url_for("admin"))
+            session["user_role"] = "admin"     # Step: store role
+            flash("Logged in successfully!", "success")
+            return redirect(url_for("dashboard"))
         else:
-            flash("Invalid credentials")
+            flash("Invalid credentials", "danger")
             return redirect(url_for("login"))
 
     return render_template("login.html")
 
+
 @app.route("/admin")
 def admin():
-    if not session.get("logged_in"):
+    # Step 3: Check if user is logged in and is admin
+    if not session.get("logged_in") or session.get("user_role") != "admin":
+        flash("You must be an admin to access this page.", "danger")
         return redirect(url_for("login"))
 
     conn = get_db_connection()
@@ -283,85 +266,175 @@ def admin():
     conn.close()
     return render_template("admin.html", scholarships=unapproved_scholarships, internships=unapproved_internships)
 
-
 @app.route('/approve_scholarship/<int:id>')
 def approve_scholarship(id):
+    if not session.get("logged_in"):
+        return "Unauthorized", 403
+
     conn = get_db_connection()
     conn.row_factory = sqlite3.Row  # Access rows as dicts
     cur = conn.cursor()
-
-    # Approve scholarship
-    cur.execute("UPDATE scholarships SET approved = 1 WHERE id = ?", (id,))
-    conn.commit()
 
     # Get scholarship details
     cur.execute("SELECT * FROM scholarships WHERE id = ?", (id,))
     scholarship = cur.fetchone()
 
-    # Get subscriber emails
-    cur.execute("SELECT email FROM subscribers")
-    subscribers = cur.fetchall()
-    conn.close()
+    if scholarship:
+        # Insert into archive
+        cur.execute("""
+            INSERT INTO scholarships_archive
+            (name, provider, eligibility, amount, deadline, link, approved)
+            VALUES (?, ?, ?, ?, ?, ?, 1)
+        """, (
+            scholarship["name"], scholarship["provider"], scholarship["eligibility"],
+            scholarship["amount"], scholarship["deadline"], scholarship["link"]
+        ))
 
-    # Send email to each subscriber
-    for subscriber in subscribers:
-        email = subscriber['email']
-        message = Message(
-            subject=f"🎓 New Scholarship: {scholarship['name']}",
-            sender='5407435.adityaprabhu@gmail.com',
-            recipients=[email],  # ✅ List format
-            body=(
-                f"📢 A new scholarship has been approved and is now live!\n\n"
-                f"🔹 Title: {scholarship['name']}\n"
-                f"🏢 Provider: {scholarship['provider']}\n"
-                f"📌 Eligibility: {scholarship['eligibility']}\n"
-                f"🗓️ Deadline: {scholarship['deadline']}\n"
-                f"🔗 Link: {scholarship['link']}\n\n"
-                f"Visit our website to explore more opportunities!"
+        # Mark as approved instead of deleting
+        cur.execute("UPDATE scholarships SET approved = 1 WHERE id = ?", (id,))
+
+        conn.commit()
+
+        # Get subscriber emails
+        cur.execute("SELECT email FROM subscribers")
+        subscribers = cur.fetchall()
+        conn.close()
+
+        # Send email to each subscriber
+        for subscriber in subscribers:
+            email = subscriber['email']
+            message = Message(
+                subject=f"🎓 New Scholarship: {scholarship['name']}",
+                sender='5407435.adityaprabhu@gmail.com',
+                recipients=[email],
+                body=(
+                    f"📢 A new scholarship has been approved and is now live!\n\n"
+                    f"🔹 Title: {scholarship['name']}\n"
+                    f"🏢 Provider: {scholarship['provider']}\n"
+                    f"📌 Eligibility: {scholarship['eligibility']}\n"
+                    f"🗓️ Deadline: {scholarship['deadline']}\n"
+                    f"🔗 Link: {scholarship['link']}\n\n"
+                    f"Visit our website to explore more opportunities!"
+                )
             )
-        )
-        try:
-            mail.send(message)
-        except Exception as e:
-            print(f"Error sending to {email}: {e}")
+            try:
+                mail.send(message)
+            except Exception as e:
+                print(f"Error sending to {email}: {e}")
 
-    flash("Scholarship approved and email sent to subscribers.", "success")
+        flash("Scholarship approved, archived, and email sent to subscribers.", "success")
+    else:
+        flash("Scholarship not found.", "danger")
+
     return redirect(url_for('admin'))
-
 
 
 @app.route("/approve-internship/<int:id>")
 def approve_internship(id):
+    if not session.get("logged_in"):
+        return "Unauthorized", 403
+
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("UPDATE internships SET approved = 1 WHERE id = ?", (id,))
-    conn.commit()
+
+    # fetch internship
+    internship = cur.execute("SELECT * FROM internships WHERE id = ?", (id,)).fetchone()
+    if internship:
+        # insert into archive
+        cur.execute("""
+            INSERT INTO internships_archive
+            (name, provider, eligibility, amount, deadline, link, duration, location, approved)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+        """, (internship["name"], internship["provider"], internship["eligibility"],
+              internship["amount"], internship["deadline"], internship["link"],
+              internship["duration"], internship["location"]))
+
+            # mark as approved instead of deleting
+        cur.execute("UPDATE internships SET approved = 1 WHERE id = ?", (id,))
+
+        conn.commit()
+
     conn.close()
     return redirect(url_for("admin"))
+
 
 @app.route('/delete_scholarship/<int:id>')
 def delete_scholarship(id):
+    if not session.get("logged_in") or session.get("user_role"):
+        flash("You do not have permission to perform this action.", "danger")
+        return redirect(url_for('home'))
+
     conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("DELETE FROM scholarships WHERE id = ?", (id,))
+    cur = conn.cursor()
+
+    # Delete from both main and archive
+    cur.execute("DELETE FROM scholarships WHERE id = ?", (id,))
+    cur.execute("DELETE FROM scholarships_archive WHERE id = ?", (id,))
+
     conn.commit()
     conn.close()
+    flash("Scholarship deleted.", "danger")
     return redirect(url_for('admin'))
 
+@app.route('/delete_scholarship_main/<int:id>', methods=["POST"])
+def delete_scholarship_main(id):
+    if not session.get("logged_in") or session.get("user_role") != "admin":
+        flash("You do not have permission to perform this action.", "danger")
+        return redirect(url_for('scholarships'))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Delete from both main and archive
+    cur.execute("DELETE FROM scholarships WHERE id = ?", (id,))
+
+    conn.commit()
+    conn.close()
+    flash("Scholarship deleted.", "danger")
+    return redirect(url_for('scholarships'))
 
 @app.route("/delete-internship/<int:id>")
 def delete_internship(id):
+    if not session.get("logged_in") or session.get("user_role") != "admin":
+        flash("You do not have permission to perform this action.", "danger")
+        return redirect(url_for('home'))
+
     conn = get_db_connection()
     cur = conn.cursor()
+
+    # Delete from both main and archive
     cur.execute("DELETE FROM internships WHERE id = ?", (id,))
+    cur.execute("DELETE FROM internships_archive WHERE id = ?", (id,))
+
     conn.commit()
     conn.close()
+    flash("Internship deleted.", "danger")
     return redirect(url_for("admin"))
+
+@app.route("/delete_internship_main/<int:id>", methods=["POST"])
+def delete_internship_main(id):
+    if not session.get("logged_in") or session.get("user_role") != "admin":
+        flash("You do not have permission to perform this action.", "danger")
+        return redirect(url_for('home'))
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Delete from both main and archive
+    cur.execute("DELETE FROM internships WHERE id = ?", (id,))
+    cur.execute("DELETE FROM internships_archive WHERE id = ?", (id,))
+
+    conn.commit()
+    conn.close()
+    flash("Internship deleted.", "danger")
+    return redirect(url_for("internships"))
 
 @app.route("/logout")
 def logout():
+    session.clear()  # Clear the session
+    flash("You have been logged out.", "info")
     session.pop("logged_in", None)
-    return redirect(url_for("home"))
+    return redirect(url_for("login"))
 
 
 @app.route("/")
@@ -384,10 +457,14 @@ def inject_current_year():
 
 @app.route("/dashboard")
 def dashboard():
+    # Step 1: Admin-only check
+    if not session.get("logged_in") or session.get("user_role") != "admin":
+        flash("You must be an admin to access the dashboard.", "danger")
+        return redirect(url_for("login"))
+
     conn = get_db_connection()
     c = conn.cursor()
 
-    # Count unapproved scholarships + internships
     # Count approved items
     c.execute("SELECT COUNT(*) FROM scholarships WHERE approved = 1")
     approved_scholarships = c.fetchone()[0]
@@ -395,21 +472,21 @@ def dashboard():
     c.execute("SELECT COUNT(*) FROM internships WHERE approved = 1")
     approved_internships = c.fetchone()[0]
 
-    # Count pending items correctly
+    # Count pending items
     c.execute("SELECT COUNT(*) FROM scholarships WHERE approved = 0")
     pending_scholarships = c.fetchone()[0]
 
     c.execute("SELECT COUNT(*) FROM internships WHERE approved = 0")
     pending_internships = c.fetchone()[0]
 
-    # Combine only pending items if needed
+    # Combine pending items
     pending_count = pending_scholarships + pending_internships
 
-    # Total counts
-    c.execute("SELECT COUNT(*) FROM scholarships WHERE approved = 1")
+    # Total counts (can include approved + pending if needed)
+    c.execute("SELECT COUNT(*) FROM scholarships")
     total_scholarships = c.fetchone()[0]
 
-    c.execute("SELECT COUNT(*) FROM internships WHERE approved = 1")
+    c.execute("SELECT COUNT(*) FROM internships")
     total_internships = c.fetchone()[0]
 
     conn.close()

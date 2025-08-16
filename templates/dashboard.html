@@ -9,10 +9,14 @@
                 <div class="card-body text-center">
                     <h5 class="card-title">Pending Approvals</h5>
                     <p class="fs-4">{{ pending_count }}</p>
-                    <a href="{{ url_for('login') }}" class="btn btn-outline-primary btn-sm">Review Now</a>
+                    <a href="{% if session.get('user_role') == 'admin' %}{{ url_for('admin') }}{% else %}{{ url_for('login') }}{% endif %}" 
+                    class="btn btn-outline-primary btn-sm">
+                        Review Now
+                    </a>
                 </div>
             </div>
         </div>
+
 
         <div class="col-md-6 col-lg-4" data-aos="fade-up" data-aos-delay="200">
             <div class="card shadow-sm border-0">
@@ -58,6 +62,8 @@
 
     <div class="text-center mt-5" data-aos="fade-up" data-aos-delay="100">
         <a href="{{ url_for('home') }}" class="btn btn-secondary">Back to Home</a>
+        <a href="{{ url_for('logout') }}" class="btn btn-outline-danger">Logout</a>
     </div>
+
 </div>
 {% endblock %}
